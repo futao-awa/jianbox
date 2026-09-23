@@ -81,7 +81,6 @@ public class BrowserActivity extends Activity {
     private SiteSafetyEngine.Result lastSafety;
     private LinearLayout safetyActions;
     private final Set<String> trustedHosts = new HashSet<>();
-    private final Set<String> warnedHosts = new HashSet<>();
     private int current = -1;
 
     static void open(Context context, String url) {
@@ -274,39 +273,47 @@ public class BrowserActivity extends Activity {
         web.setWebViewClient(new WebViewClient() {
             @Override public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 String url = request.getUrl().toString();
+                // Subframe navigation belongs to its own frame, never to the tab.
+                if (!request.isForMainFrame()) return !BrowserUrlRules.isWebViewUrl(url);
+                if (BrowserUrlRules.isWebViewUrl(url) && !BrowserUrlRules.isWebUrl(url)) return false;
                 if (handleSpecial(url, tab)) return true;
-                if (url.startsWith("http://") || url.startsWith("https://")) {
+                if (BrowserUrlRules.isWebUrl(url)) {
                     String cleaned = data.cleanTrackers() ? SiteSafetyEngine.cleanTracking(url) : url;
-                    if (!cleaned.equals(url)) { view.loadUrl(cleaned); Toast.makeText(BrowserActivity.this,"已移除链接跟踪参数",Toast.LENGTH_SHORT).show(); return true; }
                     if (data.safetyEnabled()) {
-                        SiteSafetyEngine.Result result = SiteSafetyEngine.analyze(url); updateSafetyResult(result);
-                        if ((result.level == SiteSafetyEngine.Level.DANGER || result.level == SiteSafetyEngine.Level.WARNING) && !trustedHosts.contains(result.host) && !warnedHosts.contains(result.host)) {
-                            warnedHosts.add(result.host); showRiskDialog(view,url,result); return true;
+                        SiteSafetyEngine.Result result = SiteSafetyEngine.analyze(cleaned);
+                        if (tab == activeTab()) updateSafetyResult(result);
+                        if ((result.level == SiteSafetyEngine.Level.DANGER || result.level == SiteSafetyEngine.Level.WARNING) && !trustedHosts.contains(result.host)) {
+                            showRiskDialog(view,cleaned,result); return true;
                         }
                     }
+                    if (!cleaned.equals(url)) { view.loadUrl(cleaned); Toast.makeText(BrowserActivity.this,"已移除链接跟踪参数",Toast.LENGTH_SHORT).show(); return true; }
                     return false;
                 }
+                if (!request.hasGesture()) { Toast.makeText(BrowserActivity.this,"已阻止网页自动打开外部应用",Toast.LENGTH_SHORT).show(); return true; }
                 try { startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url))); } catch (Exception ignored) { Toast.makeText(BrowserActivity.this, "无法打开此链接", Toast.LENGTH_SHORT).show(); }
                 return true;
             }
             @Override public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
-                if (BrowserExtensions.shouldBlock(data,request.getUrl().toString())) return new WebResourceResponse("text/plain", "UTF-8", new ByteArrayInputStream(new byte[0]));
+                // A deliberate top-level visit must not be silently replaced with an empty response.
+                if (!request.isForMainFrame() && BrowserExtensions.shouldBlock(data,request.getUrl().toString())) return new WebResourceResponse("text/plain", "UTF-8", new ByteArrayInputStream(new byte[0]));
+                BrowserExtensions.recordMediaRequest(view,request);
                 return super.shouldInterceptRequest(view, request);
             }
             @Override public void onPageStarted(WebView view, String url, android.graphics.Bitmap favicon) {
-                if (!url.startsWith("https://jian.home")) tab.url = url;
-                if (tab == activeTab()) { address.setText(url.startsWith("https://jian.home") ? "新标签页" : url); progress.setVisibility(View.VISIBLE); updateSafety(tab.url); }
+                BrowserExtensions.resetMediaRequests(view,url);
+                if (!BrowserUrlRules.isHome(url)) tab.url = url;
+                if (tab == activeTab()) { address.setText(BrowserUrlRules.isHome(url) ? "新标签页" : url); progress.setVisibility(View.VISIBLE); updateSafety(tab.url); }
             }
             @Override public void onPageFinished(WebView view, String url) {
-                boolean home = url.startsWith("https://jian.home"); tab.url = home ? "jian://home" : url; tab.title = home ? "新标签页" : (view.getTitle() == null || view.getTitle().isEmpty() ? host(url) : view.getTitle());
-                if (!home && data.saveBrowserHistory()) data.addHistory(tab.title, url);
+                boolean home = BrowserUrlRules.isHome(url); tab.url = home ? "jian://home" : url; tab.title = home ? "新标签页" : (view.getTitle() == null || view.getTitle().isEmpty() ? host(url) : view.getTitle());
+                if (!home && BrowserUrlRules.isWebUrl(url) && data.saveBrowserHistory()) data.addHistory(tab.title, url);
                 BrowserExtensions.cleanPage(view,url,data);
                 BrowserExtensions.installClipboardGuard(BrowserActivity.this,data,view,webContainer);
                 if (tab == activeTab()) { address.setText(home ? "新标签页" : url); progress.setVisibility(View.GONE); rebuildTabs(); updateSafety(tab.url); BrowserExtensions.detect(view,features->{if(tab==activeTab()){pageFeatures=features;rebuildExtensionBar();}}); }
                 saveSession();
             }
             @Override public void onReceivedSslError(WebView view, SslErrorHandler handler, SslError error) {
-                handler.cancel(); new AlertDialog.Builder(BrowserActivity.this).setTitle("已阻止不安全连接").setMessage("此网站的 SSL 证书无效或与域名不匹配。简盒已停止加载，建议不要继续访问。\n\n"+error.getUrl()).setPositiveButton("返回安全页",(d,w)->load(data.browserHome())).show();
+                handler.cancel(); Toast.makeText(BrowserActivity.this,"已阻止证书异常的连接："+host(error.getUrl()),Toast.LENGTH_LONG).show();
             }
             @android.annotation.TargetApi(27)
             @Override public void onSafeBrowsingHit(WebView view, WebResourceRequest request, int threatType, SafeBrowsingResponse response) {
@@ -317,9 +324,17 @@ public class BrowserActivity extends Activity {
             @Override public void onProgressChanged(WebView view, int value) { if (tab == activeTab()) { progress.setProgress(value); progress.setVisibility(value >= 100 ? View.GONE : View.VISIBLE); } }
             @Override public void onReceivedTitle(WebView view, String title) { tab.title = title == null ? tab.title : title; if (tab == activeTab()) rebuildTabs(); }
             @Override public boolean onCreateWindow(WebView view, boolean dialog, boolean userGesture, Message resultMsg) {
-                if (!userGesture) return false;
-                TabState child = new TabState(); child.url = data.browserHome(); child.title = "新标签页"; tabs.add(child); child.view = createWebView(child); webContainer.addView(child.view, new FrameLayout.LayoutParams(-1, -1));
-                WebView.WebViewTransport transport = (WebView.WebViewTransport) resultMsg.obj; transport.setWebView(child.view); resultMsg.sendToTarget(); selectTab(tabs.size() - 1); return true;
+                if (!userGesture) { Toast.makeText(BrowserActivity.this,"已阻止网页自动弹出新窗口",Toast.LENGTH_SHORT).show(); return false; }
+                // Chromium supplies the real destination after accepting the transport.
+                // HitTestResult can contain an image URL or be empty for scripted links.
+                TabState child = new TabState(); child.url = "about:blank"; child.title = "新窗口";
+                tabs.add(child); child.view = createWebView(child);
+                webContainer.addView(child.view, new FrameLayout.LayoutParams(-1, -1));
+                WebView.WebViewTransport transport = (WebView.WebViewTransport) resultMsg.obj;
+                transport.setWebView(child.view); resultMsg.sendToTarget(); selectTab(tabs.size() - 1); return true;
+            }
+            @Override public void onCloseWindow(WebView window) {
+                for (int i=0;i<tabs.size();i++) if (tabs.get(i).view==window) { closeTab(i); break; }
             }
         });
         web.setDownloadListener((url, ua, disposition, type, length) -> {
@@ -382,19 +397,29 @@ public class BrowserActivity extends Activity {
 
     private void loadTab(TabState tab, String url) {
         if (tab == null || tab.view == null) return;
-        String value = normalize(url); tab.url = value;
+        String value = normalize(url);
         if ("jian://home".equals(value)) {
-            tab.title="新标签页"; tab.view.loadDataWithBaseURL("https://jian.home/",BrowserHomePage.html(this,data),"text/html","UTF-8",null);
-        } else tab.view.loadUrl(value);
+            tab.url=value; tab.title="新标签页"; tab.view.loadDataWithBaseURL("https://jian.home/",BrowserHomePage.html(this,data),"text/html","UTF-8",null);
+            return;
+        }
+        if (handleSpecial(value,tab)) return;
+        String cleaned=data.cleanTrackers()?SiteSafetyEngine.cleanTracking(value):value;
+        if(!cleaned.equals(value))Toast.makeText(this,"已移除链接跟踪参数",Toast.LENGTH_SHORT).show();
+        value=cleaned;
+        if(data.safetyEnabled()&&(value.startsWith("http://")||value.startsWith("https://"))){
+            SiteSafetyEngine.Result result=SiteSafetyEngine.analyze(value);updateSafetyResult(result);
+            if((result.level==SiteSafetyEngine.Level.DANGER||result.level==SiteSafetyEngine.Level.WARNING)&&!trustedHosts.contains(result.host)){showRiskDialog(tab.view,value,result);return;}
+        }
+        tab.url=value; tab.view.loadUrl(value);
     }
 
     private void showRiskDialog(WebView view,String url,SiteSafetyEngine.Result result) {
         boolean danger=result.level==SiteSafetyEngine.Level.DANGER;Dialog dialog=safetyCard(danger?"高风险链接":"访问前请核对",result,result.host,url,true);
-        TextView back=panelAction("返回安全页",false),proceed=panelAction("继续访问",true);safetyActions.addView(back,new LinearLayout.LayoutParams(0,Ui.dp(this,44),1));Ui.margin(back,0,0,8,0,this);safetyActions.addView(proceed,new LinearLayout.LayoutParams(0,Ui.dp(this,44),1));back.setOnClickListener(v->{dialog.dismiss();load(data.browserHome());});proceed.setOnClickListener(v->{trustedHosts.add(result.host);dialog.dismiss();view.loadUrl(url);});dialog.setOnCancelListener(d->load(data.browserHome()));dialog.show();fitDialog(dialog);
+        TextView back=panelAction("取消访问",false),proceed=panelAction("继续访问",true);safetyActions.addView(back,new LinearLayout.LayoutParams(0,Ui.dp(this,44),1));Ui.margin(back,0,0,8,0,this);safetyActions.addView(proceed,new LinearLayout.LayoutParams(0,Ui.dp(this,44),1));back.setOnClickListener(v->dialog.dismiss());proceed.setOnClickListener(v->{dialog.dismiss();for(TabState tab:tabs)if(tab.view==view){trustedHosts.add(result.host);view.loadUrl(url);break;}});dialog.show();fitDialog(dialog);
     }
 
     private void updateSafety(String url) {
-        if (url==null || "jian://home".equals(url) || url.startsWith("https://jian.home")) {
+        if (url==null || "jian://home".equals(url) || BrowserUrlRules.isHome(url)) {
             updateSafetyResult(new SiteSafetyEngine.Result(SiteSafetyEngine.Level.SAFE,"本地主页","页面由简盒在本机生成，不会上传搜索前的输入内容。","jian.home")); return;
         }
         if (!data.safetyEnabled()) { lastSafety=null; safetyChip.setText("关闭"); safetyChip.setTextColor(Ui.MUTED); safetyChip.setBackground(Ui.bg(0xFFECEFED,10,this)); return; }
@@ -455,6 +480,7 @@ public class BrowserActivity extends Activity {
     private String normalize(String raw) {
         String value = raw == null ? "" : raw.trim();
         if (value.isEmpty() || "新标签页".equals(value)) return data == null ? "jian://home" : data.browserHome();
+        if ("about:blank".equals(value)) return value;
         if (value.matches("^[a-zA-Z][a-zA-Z0-9+.-]*://.*")) return value;
         if (value.contains(".") && !value.contains(" ")) return "https://" + value;
         return SearchEngine.url(data.searchEngine(),value);

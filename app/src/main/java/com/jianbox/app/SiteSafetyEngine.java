@@ -16,8 +16,7 @@ final class SiteSafetyEngine {
     }
 
     private static final Map<String,String> OFFICIAL = new LinkedHashMap<>();
-    private static final Set<String> TRACKERS = Set.of("fbclid","gclid","dclid","msclkid","mc_cid","mc_eid","igshid","spm","from","ref","referrer","source");
-    private static final Set<String> SHORTENERS = Set.of("bit.ly","t.co","tinyurl.com","dwz.cn","suo.im","url.cn","reurl.cc","cutt.ly");
+    private static final Set<String> SHORTENERS = new java.util.HashSet<>(java.util.Arrays.asList("bit.ly","t.co","tinyurl.com","dwz.cn","suo.im","url.cn","reurl.cc","cutt.ly"));
     static {
         OFFICIAL.put("microsoft.com","Microsoft"); OFFICIAL.put("bing.com","Microsoft Bing"); OFFICIAL.put("github.com","GitHub");
         OFFICIAL.put("google.com","Google"); OFFICIAL.put("openai.com","OpenAI"); OFFICIAL.put("baidu.com","百度");
@@ -56,14 +55,7 @@ final class SiteSafetyEngine {
     }
 
     static String cleanTracking(String raw) {
-        try {
-            Uri uri=Uri.parse(raw); if(uri.getQuery()==null)return raw; Uri.Builder b=uri.buildUpon().clearQuery(); boolean changed=false;
-            for(String key:uri.getQueryParameterNames()) {
-                boolean tracker=key.toLowerCase(Locale.ROOT).startsWith("utm_")||TRACKERS.contains(key.toLowerCase(Locale.ROOT));
-                if(tracker){changed=true;continue;} for(String value:uri.getQueryParameters(key))b.appendQueryParameter(key,value);
-            }
-            return changed?b.build().toString():raw;
-        } catch(Exception e){return raw;}
+        return BrowserUrlRules.cleanTracking(raw);
     }
 
     static boolean isHighRiskDownload(String url,String mime){

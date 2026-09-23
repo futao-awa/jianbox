@@ -11,6 +11,7 @@ import android.view.Gravity;
 import android.view.View;
 import android.view.inputmethod.EditorInfo;
 import android.webkit.JavascriptInterface;
+import android.webkit.WebResourceRequest;
 import android.webkit.WebView;
 import android.widget.EditText;
 import android.widget.FrameLayout;
@@ -28,21 +29,52 @@ import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.WeakHashMap;
 import java.security.SecureRandom;
 
 /** WebView-native extension layer shared by the full and floating browsers. */
 final class BrowserExtensions {
-    private static final String[] AD_HOST_PARTS = {
-            "doubleclick.net", "googlesyndication.com", "googleadservices.com", "adservice.",
-            "adsystem.com", "umeng.com", "cnzz.com", "tanx.com", "adnxs.com", "taboola.com",
-            "outbrain.com", "amazon-adsystem.com", "pangolin-sdk-toutiao.com"
-    };
+    private static final Object MEDIA_LOCK = new Object();
+    private static final Map<WebView,LinkedHashSet<String>> MEDIA_REQUESTS = new WeakHashMap<>();
+    private static String mediaScanScript;
 
     static boolean shouldBlock(JianData data, String url) {
-        if (!data.blockAds() || !data.pluginAdBlock() || url == null) return false;
-        String lower = url.toLowerCase(Locale.ROOT);
-        for (String part : AD_HOST_PARTS) if (lower.contains(part)) return true;
-        return false;
+        return data.blockAds() && data.pluginAdBlock() && BrowserUrlRules.isAdHost(url);
+    }
+
+    static void resetMediaRequests(WebView web, String pageUrl) {
+        if (web == null) return;
+        synchronized (MEDIA_LOCK) { MEDIA_REQUESTS.put(web,new LinkedHashSet<>(MediaUrlExtractor.extract(pageUrl,null))); }
+    }
+
+    static void recordMediaRequest(WebView web, WebResourceRequest request) {
+        if (web == null || request == null || request.getUrl() == null) return;
+        java.util.Set<String> candidates=MediaUrlExtractor.extract(request.getUrl().toString(),request.getRequestHeaders());
+        if (candidates.isEmpty()) return;
+        synchronized (MEDIA_LOCK) {
+            LinkedHashSet<String> urls=MEDIA_REQUESTS.computeIfAbsent(web,key->new LinkedHashSet<>());
+            for (String url : candidates) { if (urls.size() >= 160) break; urls.add(url); }
+        }
+    }
+
+    private static String mediaScanScript(Context context) throws java.io.IOException {
+        if (mediaScanScript == null) {
+            try (java.io.InputStream input=context.getAssets().open("media-scan.js");
+                 java.io.ByteArrayOutputStream output=new java.io.ByteArrayOutputStream()) {
+                byte[] buffer=new byte[4096]; int count;
+                while ((count=input.read(buffer)) != -1) output.write(buffer,0,count);
+                mediaScanScript=output.toString("UTF-8");
+            }
+        }
+        return mediaScanScript;
+    }
+
+    private static List<String> capturedMedia(WebView web) {
+        synchronized (MEDIA_LOCK) {
+            LinkedHashSet<String> urls=MEDIA_REQUESTS.get(web);
+            return urls==null?new ArrayList<>():new ArrayList<>(urls);
+        }
     }
 
     static void cleanPage(WebView web, String url, JianData data) {
@@ -105,7 +137,8 @@ final class BrowserExtensions {
 
     static void detect(WebView web, java.util.function.Consumer<PageFeatures> callback){
         if(web==null||callback==null)return;
-        web.evaluateJavascript("(function(){return JSON.stringify({video:document.querySelectorAll('video,audio').length>0,captions:Array.from(document.querySelectorAll('video')).some(v=>v.textTracks&&v.textTracks.length>0),downloads:Array.from(document.querySelectorAll('a[href]')).some(a=>/\\.(zip|7z|rar|apk|pdf|epub|mp3|mp4|m3u8)(\\?|#|$)/i.test(a.href)),github:/github\\.com$/i.test(location.hostname)||/github\\.com\\//i.test(location.hostname)})})()",raw->{PageFeatures f=new PageFeatures();try{JSONObject o=new JSONObject(decode(raw));f.video=o.optBoolean("video");f.captions=o.optBoolean("captions");f.downloads=o.optBoolean("downloads");f.github=o.optBoolean("github");}catch(Exception ignored){}callback.accept(f);});
+        String js="(function(){let video=false,captions=false,downloads=false;function scan(w){let d;try{d=w.document}catch(e){return}let vs=Array.from(d.querySelectorAll('video,audio'));video=video||vs.length>0;captions=captions||vs.some(v=>v.textTracks&&v.textTracks.length>0);downloads=downloads||Array.from(d.querySelectorAll('a[href]')).some(a=>/\\.(zip|7z|rar|apk|pdf|epub|mp3|mp4|m3u8|mpd)(\\?|#|$)/i.test(a.href));for(let i=0;i<w.frames.length;i++)try{scan(w.frames[i])}catch(e){}}scan(window);return JSON.stringify({video:video,captions:captions,downloads:downloads,github:/github\\.com$/i.test(location.hostname)||/github\\.com\\//i.test(location.hostname)})})()";
+        web.evaluateJavascript(js,raw->{PageFeatures f=new PageFeatures();try{JSONObject o=new JSONObject(decode(raw));f.video=o.optBoolean("video");f.captions=o.optBoolean("captions");f.downloads=o.optBoolean("downloads");f.github=o.optBoolean("github");}catch(Exception ignored){}if(!capturedMedia(web).isEmpty())f.video=true;callback.accept(f);});
     }
 
     private static void addTool(LinearLayout rail, Context context, String icon, String label, Runnable action) {
@@ -154,20 +187,25 @@ final class BrowserExtensions {
     }
 
     static void extractMedia(Context context, WebView web, FrameLayout host) {
-        if (web == null) return;
-        String js="(function(){const s=new Set();document.querySelectorAll('video,audio,source,a[href]').forEach(e=>{let u=e.currentSrc||e.src||e.href||e.getAttribute('src');if(u&&(/\\.(mp4|webm|m3u8|mp3|m4a|ogg|wav)(\\?|#|$)/i.test(u)||e.tagName!=='A')){try{s.add(new URL(u,location.href).href)}catch(x){}}});return JSON.stringify(Array.from(s).slice(0,80));})()";
-        web.evaluateJavascript(js, raw -> {
-            List<String> items=new ArrayList<>();
+        if (web == null || host == null) return;
+        String pageUrl=web.getUrl();
+        String script;
+        try { script=mediaScanScript(context); }
+        catch (java.io.IOException error) { Toast.makeText(context,"媒体扫描器加载失败，请重试",Toast.LENGTH_SHORT).show(); return; }
+        web.evaluateJavascript(script, raw -> {
+            if (!java.util.Objects.equals(pageUrl,web.getUrl())) return;
+            List<String> items=capturedMedia(web);
             try { JSONArray a=new JSONArray(decode(raw)); for(int i=0;i<a.length();i++)items.add(a.getString(i)); } catch(Exception ignored) {}
-            showList(context,host,"公开媒体地址",items,"仅列出页面 DOM 中公开的音视频地址；不处理 DRM、加密流或 blob 数据。",false);
+            showList(context,host,"公开媒体地址",items,"已合并播放器配置、页面元素和实际媒体请求。未找到时请先播放视频，再点刷新。",false,
+                    ()->extractMedia(context,web,host));
         });
     }
 
     static void showVideoSpeed(Context context, WebView web, FrameLayout host){
-        if(web==null||host==null)return;removePanel(host);LinearLayout bar=choiceBar(context,host,"视频播放",new String[]{"0.5×","1×","1.25×","1.5×","2×","3×"},value->{String speed=value.substring(0,value.length()-1);web.evaluateJavascript("(function(){document.querySelectorAll('video,audio').forEach(v=>v.playbackRate="+speed+");return true})()",ignored->{Toast.makeText(context,"已设置播放速度 "+value,Toast.LENGTH_SHORT).show();});});TextView captions=smallButton(context,"字幕");captions.setTextSize(11);captions.setOnClickListener(v->enableCaptions(context,web));bar.addView(captions,new LinearLayout.LayoutParams(Ui.dp(context,48),Ui.dp(context,32)));addPanel(context,host,bar);
+        if(web==null||host==null)return;removePanel(host);LinearLayout bar=choiceBar(context,host,"视频播放",new String[]{"0.5×","1×","1.25×","1.5×","2×","3×"},value->{String speed=value.substring(0,value.length()-1);String js="(function(){let n=0;function scan(w){let d;try{d=w.document}catch(e){return}d.querySelectorAll('video,audio').forEach(v=>{v.playbackRate="+speed+";n++});for(let i=0;i<w.frames.length;i++)try{scan(w.frames[i])}catch(e){}}scan(window);return n})()";web.evaluateJavascript(js,raw->{boolean changed=raw!=null&&raw.matches("[1-9][0-9]*");Toast.makeText(context,changed?"已设置播放速度 "+value:"未找到可控制的播放器，请尝试网页自带倍速",Toast.LENGTH_SHORT).show();});});TextView captions=smallButton(context,"字幕");captions.setTextSize(11);captions.setOnClickListener(v->enableCaptions(context,web));bar.addView(captions,new LinearLayout.LayoutParams(Ui.dp(context,48),Ui.dp(context,32)));addPanel(context,host,bar);
     }
 
-    static void enableCaptions(Context context, WebView web){if(web==null)return;web.evaluateJavascript("(function(){let n=0;document.querySelectorAll('video').forEach(v=>Array.from(v.textTracks||[]).forEach(t=>{t.mode='showing';n++}));return n})()",raw->{try{int n=Integer.parseInt(raw);Toast.makeText(context,n>0?"已启用网页字幕轨":"此页面没有可用字幕轨",Toast.LENGTH_SHORT).show();}catch(Exception e){Toast.makeText(context,"未发现可用字幕轨",Toast.LENGTH_SHORT).show();}});}
+    static void enableCaptions(Context context, WebView web){if(web==null)return;String js="(function(){let n=0;function scan(w){let d;try{d=w.document}catch(e){return}d.querySelectorAll('video').forEach(v=>Array.from(v.textTracks||[]).forEach(t=>{t.mode='showing';n++}));for(let i=0;i<w.frames.length;i++)try{scan(w.frames[i])}catch(e){}}scan(window);return n})()";web.evaluateJavascript(js,raw->{try{int n=Integer.parseInt(raw);Toast.makeText(context,n>0?"已启用网页字幕轨":"此页面没有可用字幕轨",Toast.LENGTH_SHORT).show();}catch(Exception e){Toast.makeText(context,"未发现可用字幕轨",Toast.LENGTH_SHORT).show();}});}
 
     static void enableSuperCopy(Context context, WebView web){if(web==null)return;web.evaluateJavascript("(function(){document.documentElement.style.userSelect='text';document.body.style.userSelect='text';document.oncopy=null;document.onselectstart=null;document.querySelectorAll('*').forEach(e=>{e.style.userSelect='text';e.oncopy=null;e.onselectstart=null});return true})()",ignored->Toast.makeText(context,"已允许选择和复制页面文字",Toast.LENGTH_SHORT).show());}
 
@@ -206,11 +244,16 @@ final class BrowserExtensions {
     private static String formatHtml(String value){if(value==null)return"";return value.replace("><","&gt;\n&lt;").replace("<","\n<").replace(">",">\n").replace("\n\n","\n");}
 
     private static void showList(Context context, FrameLayout host, String title, List<String> rawItems, String hint, boolean sourceMode) {
+        showList(context,host,title,rawItems,hint,sourceMode,null);
+    }
+
+    private static void showList(Context context, FrameLayout host, String title, List<String> rawItems, String hint, boolean sourceMode, Runnable refresh) {
         if(host==null)return;removePanel(host);
         LinkedHashSet<String> unique=new LinkedHashSet<>(rawItems);List<String> items=new ArrayList<>(unique);
         FrameLayout veil=new FrameLayout(context);veil.setTag("jian_extension_panel");veil.setBackgroundColor(0x99000000);
         LinearLayout card=Ui.vertical(context);card.setPadding(Ui.dp(context,14),Ui.dp(context,12),Ui.dp(context,14),Ui.dp(context,12));card.setBackground(Ui.bg(Ui.SURFACE,14,context));
         LinearLayout head=Ui.horizontal(context);head.addView(Ui.text(context,title,15,Ui.TEXT,true),new LinearLayout.LayoutParams(0,Ui.dp(context,38),1));TextView close=smallButton(context,"×");head.addView(close,new LinearLayout.LayoutParams(Ui.dp(context,40),Ui.dp(context,38)));card.addView(head);
+        if(refresh!=null){TextView reload=panelButton(context,"刷新媒体地址",false);reload.setOnClickListener(v->refresh.run());card.addView(reload,new LinearLayout.LayoutParams(-1,Ui.dp(context,36)));}
         TextView note=Ui.text(context,hint,10,Ui.MUTED,false);note.setPadding(0,0,0,Ui.dp(context,7));card.addView(note);
         ScrollView scroll=new ScrollView(context);LinearLayout list=Ui.vertical(context);scroll.addView(list,new ScrollView.LayoutParams(-1,-2));
         if(items.isEmpty()){TextView empty=Ui.text(context,"当前页面未发现可提取内容",12,Ui.MUTED,false);empty.setGravity(Gravity.CENTER);list.addView(empty,new LinearLayout.LayoutParams(-1,Ui.dp(context,100)));}
