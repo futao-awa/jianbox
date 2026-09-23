@@ -1,0 +1,13 @@
+*.iml
+.gradle/
+.idea/
+local.properties
+supabase/.env
+*.keystore
+build/
+app/build/
+captures/
+.externalNativeBuild/
+supabase/admin-console/config.js
+node_modules/
+server/data/

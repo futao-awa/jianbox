@@ -1,0 +1,10 @@
+plugins {
+    id 'com.android.application' version '8.7.3' apply false
+}
+
+if (project.hasProperty('isolatedBuildDir')) {
+    layout.buildDirectory = file(project.property('isolatedBuildDir'))
+    subprojects {
+        layout.buildDirectory = file("${rootProject.property('isolatedBuildDir')}/${project.name}")
+    }
+}

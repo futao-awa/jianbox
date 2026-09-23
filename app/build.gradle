@@ -1,0 +1,54 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.jianbox.app'
+    compileSdk 36
+
+    buildFeatures {
+        buildConfig = true
+    }
+
+    defaultConfig {
+        applicationId 'com.jianbox.app'
+        minSdk 26
+        targetSdk 36
+        versionCode 21
+        versionName '3.9.7'
+        // Both values are supplied by local Gradle properties or environment variables.
+        // Never commit a service_role key; the Android client only needs the publishable key.
+        def supabaseUrl = project.findProperty('SUPABASE_URL') ?: System.getenv('SUPABASE_URL') ?: ""
+        def supabaseAnonKey = project.findProperty('SUPABASE_ANON_KEY') ?: System.getenv('SUPABASE_ANON_KEY') ?: ""
+        buildConfigField 'String', 'SUPABASE_URL', '"' + supabaseUrl.replace('"', '\"') + '"'
+        buildConfigField 'String', 'SUPABASE_ANON_KEY', '"' + supabaseAnonKey.replace('"', '\"') + '"'
+    }
+
+    buildTypes {
+        debug {
+            // Project-local debug key: avoids a concurrently locked Android default debug keystore.
+            signingConfig signingConfigs.debug
+        }
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+
+    signingConfigs {
+        debug {
+            def localDebugKey = rootProject.file("work/jianbox-debug.keystore")
+            if (localDebugKey.exists()) {
+                storeFile localDebugKey
+                storePassword "android"
+                keyAlias "jianbox-debug"
+                keyPassword "android"
+            }
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}

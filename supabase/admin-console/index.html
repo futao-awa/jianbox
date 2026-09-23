@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <meta name="color-scheme" content="light">
+  <title>简盒 · 运营控制台</title>
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <main class="login-shell" id="loginView">
+    <section class="login-panel">
+      <div class="brand-row"><div class="brand-mark">简</div><div><span>JIANBOX ADMIN</span><strong>运营控制台</strong></div></div>
+      <div class="login-copy">
+        <p class="kicker">AUTHORIZED ACCESS</p>
+        <h1>管理简盒服务</h1>
+        <p>版本发布、用户管理、运营公告与审计记录集中在一个安全入口。</p>
+      </div>
+      <form id="loginForm" class="login-form">
+        <label><span>管理员邮箱</span><input id="email" type="email" autocomplete="email" placeholder="name@example.com" required></label>
+        <label><span>密码</span><input id="password" type="password" autocomplete="current-password" placeholder="输入密码" required></label>
+        <button class="button primary wide" type="submit"><i data-lucide="log-in"></i><span>登录控制台</span></button>
+      </form>
+      <p id="loginStatus" class="status-line" aria-live="polite"></p>
+      <div class="security-note"><i data-lucide="shield-check"></i><span>页面不保存服务端密钥，高权限操作由 Edge Function 二次鉴权。</span></div>
+    </section>
+  </main>
+
+  <section class="admin-app hidden" id="dashboardView">
+    <aside class="sidebar">
+      <div class="sidebar-brand"><div class="brand-mark compact">简</div><div><strong>简盒</strong><span>运营控制台</span></div></div>
+      <nav class="nav-list" aria-label="管理分区">
+        <button class="nav-item active" data-view="overview"><i data-lucide="layout-dashboard"></i><span>概览</span></button>
+        <button class="nav-item" data-view="users"><i data-lucide="users"></i><span>用户</span></button>
+        <button class="nav-item" data-view="releases"><i data-lucide="package-plus"></i><span>版本</span></button>
+        <button class="nav-item" data-view="announcements"><i data-lucide="megaphone"></i><span>公告</span></button>
+        <button class="nav-item" data-view="audit"><i data-lucide="scroll-text"></i><span>审计</span></button>
+        <button class="nav-item" data-view="settings"><i data-lucide="settings-2"></i><span>状态</span></button>
+      </nav>
+      <div class="sidebar-account">
+        <div class="avatar">管</div>
+        <div><strong id="adminEmail">管理员</strong><span>Supabase 管理员</span></div>
+        <button id="logoutButton" class="icon-button" title="退出登录" aria-label="退出登录"><i data-lucide="log-out"></i></button>
+      </div>
+    </aside>
+
+    <div class="workspace">
+      <header class="workspace-header">
+        <div><p class="kicker" id="pageKicker">OPERATIONS</p><h1 id="pageTitle">运营概览</h1><p id="pageSubtitle">查看用户、版本和服务运行状态</p></div>
+        <div class="header-actions"><span id="appStatus" class="status-line compact" aria-live="polite"></span><button id="refreshButton" class="icon-button" title="刷新当前页面" aria-label="刷新当前页面"><i data-lucide="refresh-cw"></i></button></div>
+      </header>
+
+      <div class="workspace-content">
+        <section class="page-view active" data-page="overview">
+          <div class="metric-grid">
+            <article class="metric-card green"><span>注册用户</span><strong id="registeredUsers">—</strong><small>已创建账号</small></article>
+            <article class="metric-card blue"><span>24 小时活跃</span><strong id="active24h">—</strong><small>最近打开应用</small></article>
+            <article class="metric-card violet"><span>30 天活跃</span><strong id="active30d">—</strong><small>月度活跃账号</small></article>
+            <article class="metric-card amber"><span>匿名设备</span><strong id="anonymousCurrent">—</strong><small>未绑定账号</small></article>
+            <article class="metric-card cyan"><span>版本记录</span><strong id="releaseCount">—</strong><small>草稿与已发布</small></article>
+            <article class="metric-card coral"><span>生效公告</span><strong id="announcementCount">—</strong><small>当前公开公告</small></article>
+          </div>
+          <div class="overview-grid">
+            <section class="panel current-release-panel">
+              <div class="panel-heading"><div><p class="kicker">CURRENT RELEASE</p><h2>当前正式版本</h2></div><button class="text-button" data-go="releases">管理版本<i data-lucide="arrow-right"></i></button></div>
+              <div id="currentRelease" class="release-highlight loading-block">正在读取版本信息…</div>
+            </section>
+            <section class="panel">
+              <div class="panel-heading"><div><p class="kicker">VERSION ACTIVITY</p><h2>近 30 天版本活跃</h2></div></div>
+              <div id="versionDistribution" class="bar-list loading-block">正在统计版本分布…</div>
+            </section>
+            <section class="panel wide-panel">
+              <div class="panel-heading"><div><p class="kicker">RECENT ACTIVITY</p><h2>最近管理操作</h2></div><button class="text-button" data-go="audit">查看全部<i data-lucide="arrow-right"></i></button></div>
+              <div id="recentAudit" class="activity-list loading-block">正在读取审计记录…</div>
+            </section>
+          </div>
+        </section>
+
+        <section class="page-view" data-page="users">
+          <section class="panel page-panel">
+            <div class="panel-heading toolbar"><div><p class="kicker">USER DIRECTORY</p><h2>注册用户</h2></div><div class="search-control"><i data-lucide="search"></i><input id="searchInput" placeholder="邮箱、用户名或 UUID"><button id="searchButton" class="button secondary">搜索</button></div></div>
+            <div class="table-wrap"><table><thead><tr><th>用户</th><th>UUID</th><th>硬币 / 签到</th><th>最近活跃</th><th>状态</th><th>操作</th></tr></thead><tbody id="userRows"><tr><td colspan="6" class="empty-state">正在读取用户数据…</td></tr></tbody></table></div>
+            <footer class="pager"><button id="previousPage" class="button secondary"><i data-lucide="chevron-left"></i>上一页</button><span id="pageLabel">第 1 页</span><button id="nextPage" class="button secondary">下一页<i data-lucide="chevron-right"></i></button></footer>
+          </section>
+        </section>
+
+        <section class="page-view" data-page="releases">
+          <section class="panel page-panel">
+            <div class="panel-heading toolbar"><div><p class="kicker">RELEASE CENTER</p><h2>版本发布</h2><p>上传 APK、配置更新策略并远程发布。</p></div><button id="newReleaseButton" class="button primary"><i data-lucide="plus"></i>新建版本</button></div>
+            <div id="releaseRows" class="release-list loading-block">正在读取版本记录…</div>
+          </section>
+        </section>
+
+        <section class="page-view" data-page="announcements">
+          <section class="panel page-panel">
+            <div class="panel-heading toolbar"><div><p class="kicker">NOTICE CENTER</p><h2>运营公告</h2><p>管理维护通知、功能公告和安全提醒。</p></div><button id="newAnnouncementButton" class="button primary"><i data-lucide="plus"></i>新建公告</button></div>
+            <div id="announcementRows" class="announcement-list loading-block">正在读取公告…</div>
+          </section>
+        </section>
+
+        <section class="page-view" data-page="audit">
+          <section class="panel page-panel">
+            <div class="panel-heading"><div><p class="kicker">AUDIT LOG</p><h2>管理审计</h2><p>追踪用户、版本和公告的高权限操作。</p></div></div>
+            <div id="auditRows" class="audit-list loading-block">正在读取审计记录…</div>
+          </section>
+        </section>
+
+        <section class="page-view" data-page="settings">
+          <div class="settings-grid">
+            <section class="panel"><div class="panel-heading"><div><p class="kicker">SERVICE STATUS</p><h2>后端状态</h2></div></div><div id="serviceStatus" class="settings-list loading-block">正在检查服务…</div></section>
+            <section class="panel"><div class="panel-heading"><div><p class="kicker">UPDATE FLOW</p><h2>更新链路</h2></div></div><div class="flow-list"><div><i data-lucide="upload-cloud"></i><span><strong>上传 APK</strong><small>管理员会话通过 Storage RLS 上传</small></span></div><div><i data-lucide="file-check-2"></i><span><strong>保存版本</strong><small>记录版本、哈希和更新说明</small></span></div><div><i data-lucide="send"></i><span><strong>正式发布</strong><small>客户端启动或恢复前台时检查</small></span></div></div></section>
+            <section class="panel wide-panel"><div class="panel-heading"><div><p class="kicker">SECURITY BOUNDARY</p><h2>安全边界</h2></div></div><div class="security-grid"><div><i data-lucide="key-round"></i><strong>公开密钥</strong><p>页面仅使用 publishable key，不能绕过 RLS。</p></div><div><i data-lucide="server-cog"></i><strong>高权限操作</strong><p>service-role 仅存在于 Edge Function 环境。</p></div><div><i data-lucide="clipboard-check"></i><strong>审计记录</strong><p>发布、撤回、封禁和删除均记录操作人。</p></div></div></section>
+          </div>
+        </section>
+      </div>
+    </div>
+  </section>
+
+  <dialog id="confirmDialog" class="modal small-modal"><form method="dialog" class="modal-body"><div class="modal-icon danger-tone"><i data-lucide="triangle-alert"></i></div><div><p class="kicker">CONFIRM ACTION</p><h2 id="dialogTitle">确认操作</h2><p id="dialogText" class="modal-copy"></p></div><div class="modal-actions"><button value="cancel" class="button secondary">取消</button><button id="dialogConfirm" value="confirm" class="button danger-button">确认</button></div></form></dialog>
+
+  <dialog id="releaseDialog" class="modal form-modal">
+    <form id="releaseForm" class="modal-body">
+      <div class="modal-header"><div><p class="kicker">RELEASE EDITOR</p><h2 id="releaseDialogTitle">新建版本</h2><p>上传 APK 后保存草稿，确认无误再发布。</p></div><button type="button" class="icon-button" data-close="releaseDialog" title="关闭" aria-label="关闭"><i data-lucide="x"></i></button></div>
+      <input id="releaseId" type="hidden"><input id="releaseStoragePath" type="hidden"><input id="releaseFileName" type="hidden"><input id="releaseFileSize" type="hidden"><input id="releaseSha256" type="hidden">
+      <div class="form-grid three"><label><span>versionCode</span><input id="releaseVersionCode" type="number" min="1" required></label><label><span>版本名称</span><input id="releaseVersionName" maxlength="80" placeholder="例如 4.0.0" required></label><label><span>最低可用版本</span><input id="releaseMinVersion" type="number" min="1" value="1" required></label></div>
+      <div class="form-grid two"><label><span>发布渠道</span><select id="releaseChannel"><option value="stable">稳定版</option><option value="beta">测试版（旧客户端不可见）</option></select></label><label class="switch-field"><span><strong>强制更新</strong><small>当前版本低于最低可用版本时强制退出</small></span><input id="releaseForce" type="checkbox" role="switch"></label></div>
+      <label><span>APK 文件</span><div class="upload-field"><input id="releaseFile" type="file" accept=".apk,application/vnd.android.package-archive"><i data-lucide="file-up"></i><div><strong id="releaseFileLabel">选择 APK 文件</strong><small>最大 200 MB，上传时自动计算 SHA-256</small></div></div></label>
+      <div id="uploadProgress" class="upload-progress hidden"><div><span id="uploadProgressText">准备上传…</span><strong id="uploadProgressValue">0%</strong></div><progress id="uploadProgressBar" max="100" value="0"></progress></div>
+      <label><span>APK 下载地址</span><input id="releaseApkUrl" type="url" placeholder="上传后自动填写，也可输入 HTTPS 地址"></label>
+      <label><span>更新说明</span><textarea id="releaseNotes" rows="7" maxlength="12000" placeholder="逐行填写新功能、修复和升级注意事项"></textarea></label>
+      <div class="modal-actions"><button type="button" class="button secondary" data-close="releaseDialog">取消</button><button id="saveReleaseButton" type="submit" class="button primary"><i data-lucide="save"></i>保存草稿</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="announcementDialog" class="modal form-modal">
+    <form id="announcementForm" class="modal-body">
+      <div class="modal-header"><div><p class="kicker">NOTICE EDITOR</p><h2 id="announcementDialogTitle">新建公告</h2><p>公告可设置生效时间和目标版本范围。</p></div><button type="button" class="icon-button" data-close="announcementDialog" title="关闭" aria-label="关闭"><i data-lucide="x"></i></button></div>
+      <input id="announcementId" type="hidden">
+      <div class="form-grid two"><label><span>公告标题</span><input id="announcementTitle" maxlength="160" required></label><label><span>重要程度</span><select id="announcementLevel"><option value="info">普通通知</option><option value="success">功能上线</option><option value="warning">维护提醒</option><option value="critical">重要安全通知</option></select></label></div>
+      <label><span>公告内容</span><textarea id="announcementBody" rows="8" maxlength="12000" required></textarea></label>
+      <div class="form-grid two"><label><span>开始时间（可选）</span><input id="announcementStartsAt" type="datetime-local"></label><label><span>结束时间（可选）</span><input id="announcementEndsAt" type="datetime-local"></label></div>
+      <div class="form-grid two"><label><span>最低目标 versionCode</span><input id="announcementMinVersion" type="number" min="1" placeholder="不限"></label><label><span>最高目标 versionCode</span><input id="announcementMaxVersion" type="number" min="1" placeholder="不限"></label></div>
+      <div class="modal-actions"><button type="button" class="button secondary" data-close="announcementDialog">取消</button><button id="saveAnnouncementButton" type="submit" class="button primary"><i data-lucide="save"></i>保存公告</button></div>
+    </form>
+  </dialog>
+
+  <div id="toastRegion" class="toast-region" aria-live="polite"></div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.4/dist/umd/supabase.min.js"></script>
+  <script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js"></script>
+  <script src="./config.js"></script>
+  <script src="./app.js"></script>
+</body>
+</html>
