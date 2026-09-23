@@ -14,8 +14,8 @@ android {
         applicationId 'com.jianbox.app'
         minSdk 26
         targetSdk 36
-        versionCode 21
-        versionName '3.9.7'
+        versionCode 22
+        versionName '3.9.8'
         // Both values are supplied by local Gradle properties or environment variables.
         // Never commit a service_role key; the Android client only needs the publishable key.
         def supabaseUrl = project.findProperty('SUPABASE_URL') ?: System.getenv('SUPABASE_URL') ?: ""
