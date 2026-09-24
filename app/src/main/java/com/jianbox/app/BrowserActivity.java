@@ -221,7 +221,7 @@ public class BrowserActivity extends Activity {
     private void closeTab(int index) {
         if (index < 0 || index >= tabs.size()) return;
         TabState removed = tabs.remove(index);
-        if (removed.view != null) { webContainer.removeView(removed.view); removed.view.destroy(); }if(removed.preview!=null&&!removed.preview.isRecycled())removed.preview.recycle();
+        if (removed.view != null) { webContainer.removeView(removed.view); BlobDownloads.release(removed.view);removed.view.destroy(); }if(removed.preview!=null&&!removed.preview.isRecycled())removed.preview.recycle();
         if (tabs.isEmpty()) { current = -1; addTab(data.browserHome(), true); return; }
         if (index < current) current--; else if (index == current) current = -1;
         selectTab(Math.min(index, tabs.size() - 1));
@@ -239,7 +239,7 @@ public class BrowserActivity extends Activity {
     private void showTabSwitcher(){
         TabState active=activeTab();if(active!=null)capturePreview(active);View old=browserShell.findViewWithTag("tab_switcher");if(old!=null)browserShell.removeView(old);
         FrameLayout overlay=new FrameLayout(this);overlay.setTag("tab_switcher");overlay.setBackgroundColor(0xFFF2F6F3);LinearLayout column=Ui.vertical(this);column.setPadding(Ui.dp(this,12),Ui.dp(this,8),Ui.dp(this,12),Ui.dp(this,10));overlay.addView(column,new FrameLayout.LayoutParams(-1,-1));
-        LinearLayout head=Ui.horizontal(this);TextView close=toolbarButton("‹");close.setOnClickListener(v->browserShell.removeView(overlay));head.addView(close,new LinearLayout.LayoutParams(Ui.dp(this,38),Ui.dp(this,42)));LinearLayout title=Ui.vertical(this);title.addView(Ui.text(this,"窗口",19,Ui.TEXT,true));title.addView(Ui.text(this,tabs.size()+" 个页面 · 点击卡片切换",9,Ui.MUTED,false));head.addView(title,Ui.weight(1));TextView clear=Ui.text(this,"全部关闭",10,Ui.RED,true);clear.setGravity(Gravity.CENTER);clear.setOnClickListener(v->{for(TabState tab:new ArrayList<>(tabs)){if(tab.view!=null){webContainer.removeView(tab.view);tab.view.destroy();}if(tab.preview!=null&&!tab.preview.isRecycled())tab.preview.recycle();}tabs.clear();current=-1;browserShell.removeView(overlay);addTab(data.browserHome(),true);});head.addView(clear,new LinearLayout.LayoutParams(Ui.dp(this,70),Ui.dp(this,40)));column.addView(head,new LinearLayout.LayoutParams(-1,Ui.dp(this,48)));
+        LinearLayout head=Ui.horizontal(this);TextView close=toolbarButton("‹");close.setOnClickListener(v->browserShell.removeView(overlay));head.addView(close,new LinearLayout.LayoutParams(Ui.dp(this,38),Ui.dp(this,42)));LinearLayout title=Ui.vertical(this);title.addView(Ui.text(this,"窗口",19,Ui.TEXT,true));title.addView(Ui.text(this,tabs.size()+" 个页面 · 点击卡片切换",9,Ui.MUTED,false));head.addView(title,Ui.weight(1));TextView clear=Ui.text(this,"全部关闭",10,Ui.RED,true);clear.setGravity(Gravity.CENTER);clear.setOnClickListener(v->{for(TabState tab:new ArrayList<>(tabs)){if(tab.view!=null){webContainer.removeView(tab.view);BlobDownloads.release(tab.view);tab.view.destroy();}if(tab.preview!=null&&!tab.preview.isRecycled())tab.preview.recycle();}tabs.clear();current=-1;browserShell.removeView(overlay);addTab(data.browserHome(),true);});head.addView(clear,new LinearLayout.LayoutParams(Ui.dp(this,70),Ui.dp(this,40)));column.addView(head,new LinearLayout.LayoutParams(-1,Ui.dp(this,48)));
         ScrollView scroll=new ScrollView(this);GridLayout grid=new GridLayout(this);float density=getResources().getDisplayMetrics().density;int screenWidth=getResources().getDisplayMetrics().widthPixels;float screenDp=screenWidth/density;int columns=screenDp>=1000?4:screenDp>=700?3:2;grid.setColumnCount(columns);grid.setPadding(0,Ui.dp(this,5),0,Ui.dp(this,8));scroll.addView(grid,new ScrollView.LayoutParams(-1,-2));column.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));int cardWidth=(screenWidth-Ui.dp(this,24+columns*6))/columns;
         for(int i=0;i<tabs.size();i++){final int index=i;TabState tab=tabs.get(i);LinearLayout card=Ui.vertical(this);card.setPadding(Ui.dp(this,7),Ui.dp(this,7),Ui.dp(this,7),Ui.dp(this,6));card.setBackground(i==current?Ui.bordered(Color.WHITE,Ui.GREEN,13,this):Ui.bordered(Color.WHITE,0x335F7964,13,this));
             FrameLayout previewBox=new FrameLayout(this);previewBox.setBackground(Ui.bg(0xFFE8EFEA,8,this));if(tab.preview!=null&&!tab.preview.isRecycled()){ImageView image=new ImageView(this);image.setScaleType(ImageView.ScaleType.CENTER_CROP);image.setImageBitmap(tab.preview);previewBox.addView(image,new FrameLayout.LayoutParams(-1,-1));}else{TextView placeholder=Ui.text(this,shortTitle(tab.title),12,Ui.MUTED,true);placeholder.setGravity(Gravity.CENTER);previewBox.addView(placeholder,new FrameLayout.LayoutParams(-1,-1));}TextView x=Ui.text(this,"×",15,Color.WHITE,true);x.setGravity(Gravity.CENTER);x.setBackground(Ui.bg(0x99000000,10,this));FrameLayout.LayoutParams xp=new FrameLayout.LayoutParams(Ui.dp(this,25),Ui.dp(this,25),Gravity.TOP|Gravity.END);xp.setMargins(0,Ui.dp(this,3),Ui.dp(this,3),0);previewBox.addView(x,xp);card.addView(previewBox,new LinearLayout.LayoutParams(-1,Ui.dp(this,112)));
@@ -270,6 +270,7 @@ public class BrowserActivity extends Activity {
         s.setUserAgentString(EDGE_UA); s.setDefaultTextEncodingName("UTF-8");
         if (android.os.Build.VERSION.SDK_INT >= 29) s.setForceDark(WebSettings.FORCE_DARK_AUTO);
         CookieManager.getInstance().setAcceptCookie(true); CookieManager.getInstance().setAcceptThirdPartyCookies(web, true);
+        BlobDownloads.install(web);
         web.setWebViewClient(new WebViewClient() {
             @Override public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 String url = request.getUrl().toString();
@@ -300,14 +301,14 @@ public class BrowserActivity extends Activity {
                 return super.shouldInterceptRequest(view, request);
             }
             @Override public void onPageStarted(WebView view, String url, android.graphics.Bitmap favicon) {
-                BrowserExtensions.resetMediaRequests(view,url);
+                BlobDownloads.onPageStarted(view,url);BrowserExtensions.resetMediaRequests(view,url);
                 if (!BrowserUrlRules.isHome(url)) tab.url = url;
                 if (tab == activeTab()) { address.setText(BrowserUrlRules.isHome(url) ? "新标签页" : url); progress.setVisibility(View.VISIBLE); updateSafety(tab.url); }
             }
             @Override public void onPageFinished(WebView view, String url) {
                 boolean home = BrowserUrlRules.isHome(url); tab.url = home ? "jian://home" : url; tab.title = home ? "新标签页" : (view.getTitle() == null || view.getTitle().isEmpty() ? host(url) : view.getTitle());
                 if (!home && BrowserUrlRules.isWebUrl(url) && data.saveBrowserHistory()) data.addHistory(tab.title, url);
-                BrowserExtensions.cleanPage(view,url,data);
+                BlobDownloads.onPageFinished(view);BrowserExtensions.cleanPage(view,url,data);
                 BrowserExtensions.installClipboardGuard(BrowserActivity.this,data,view,webContainer);
                 if (tab == activeTab()) { address.setText(home ? "新标签页" : url); progress.setVisibility(View.GONE); rebuildTabs(); updateSafety(tab.url); BrowserExtensions.detect(view,features->{if(tab==activeTab()){pageFeatures=features;rebuildExtensionBar();}}); }
                 saveSession();
@@ -338,6 +339,7 @@ public class BrowserActivity extends Activity {
             }
         });
         web.setDownloadListener((url, ua, disposition, type, length) -> {
+            if(BlobDownloads.isBlob(url)){BlobDownloads.request(this,web,url,ua,disposition,type,downloadOverlayHost);return;}
             if(SiteSafetyEngine.isHighRiskDownload(url,type))new AlertDialog.Builder(this).setTitle("高风险文件类型").setMessage("该链接指向可执行文件或脚本。此类文件可能被用于钓鱼、远控或银狐类攻击。简盒只能识别风险类型，不能确认文件是否无毒。\n\n"+url).setNegativeButton("取消",null).setPositiveButton("仍然下载",(d,w)->BrowserDownloads.confirm(this,url,ua,disposition,type,downloadOverlayHost)).show();
             else BrowserDownloads.confirm(this,url,ua,disposition,type,downloadOverlayHost);
         });
@@ -350,7 +352,7 @@ public class BrowserActivity extends Activity {
         while (loaded.size() > 1) {
             TabState old = loaded.remove(0); old.url = old.view.getUrl() == null ? old.url : old.view.getUrl();
             capturePreview(old);
-            webContainer.removeView(old.view); old.view.stopLoading(); old.view.destroy(); old.view = null;
+            webContainer.removeView(old.view); old.view.stopLoading(); BlobDownloads.release(old.view);old.view.destroy(); old.view = null;
         }
     }
 
@@ -521,5 +523,5 @@ public class BrowserActivity extends Activity {
     @Override public void onBackPressed() {View switcher=browserShell==null?null:browserShell.findViewWithTag("tab_switcher");if(switcher!=null){browserShell.removeView(switcher);return;}WebView web=activeWeb();if(web!=null&&web.canGoBack()){web.goBack();return;}saveSession();finish(); }
     @Override protected void onPause() { super.onPause(); WebView w = activeWeb(); if (w != null) w.onPause(); saveSession(); }
     @Override protected void onResume() { super.onResume();if(!UpdateGuard.resume(this))return;Ui.applyTheme(data); if(address!=null)address.setHint(SearchEngine.label(data.searchEngine())+" 搜索或输入网址");rebuildExtensionBar();WebView w = activeWeb(); if (w != null) w.onResume(); }
-    @Override protected void onDestroy() { for (TabState t : tabs) {if (t.view != null) t.view.destroy();if(t.preview!=null&&!t.preview.isRecycled())t.preview.recycle();} super.onDestroy(); }
+    @Override protected void onDestroy() { for (TabState t : tabs) {if (t.view != null) {BlobDownloads.release(t.view);t.view.destroy();}if(t.preview!=null&&!t.preview.isRecycled())t.preview.recycle();} super.onDestroy(); }
 }

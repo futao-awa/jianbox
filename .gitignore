@@ -11,3 +11,11 @@ captures/
 supabase/admin-console/config.js
 node_modules/
 server/data/
+.env
+.env.*
+*.jks
+*.apk
+*.aab
+*.local.properties
+test-build.properties
+local-config/

@@ -2,6 +2,31 @@ plugins {
     id 'com.android.application'
 }
 
+// Explicit, external configuration is used by debug builds only, never copied into sources.
+def testConfig = new Properties()
+def testConfigPath = project.findProperty('testBuildConfigFile')
+if (testConfigPath) {
+    def configFile = rootProject.file(testConfigPath).canonicalFile
+    if (configFile.toPath().startsWith(rootProject.projectDir.canonicalFile.toPath())) {
+        throw new GradleException('Test build configuration must be outside the source repository.')
+    }
+    if (!configFile.isFile()) throw new GradleException('Test build configuration file does not exist.')
+    configFile.withReader('UTF-8') { testConfig.load(it) }
+    def endpoint = testConfig.getProperty('SUPABASE_URL', '')
+    def clientKey = testConfig.getProperty('SUPABASE_ANON_KEY', '')
+    boolean publicKey = clientKey.startsWith('sb_publishable_')
+    if (clientKey.startsWith('eyJ')) {
+        try {
+            def claims = new groovy.json.JsonSlurper().parseText(new String(java.util.Base64.urlDecoder.decode(clientKey.tokenize('.')[1]), 'UTF-8'))
+            publicKey = claims.role == 'anon'
+        } catch (Exception ignored) { publicKey = false }
+    }
+    if (!endpoint.startsWith('https://') || !publicKey) {
+        throw new GradleException('Test builds require an HTTPS Supabase URL and a public client key; secret/service-role keys are prohibited.')
+    }
+}
+def javaString = { String value -> groovy.json.JsonOutput.toJson(value ?: '') }
+
 android {
     namespace 'com.jianbox.app'
     compileSdk 36
@@ -14,20 +39,17 @@ android {
         applicationId 'com.jianbox.app'
         minSdk 26
         targetSdk 36
-        versionCode 22
-        versionName '3.9.8'
-        // Both values are supplied by local Gradle properties or environment variables.
-        // Never commit a service_role key; the Android client only needs the publishable key.
-        def supabaseUrl = project.findProperty('SUPABASE_URL') ?: System.getenv('SUPABASE_URL') ?: ""
-        def supabaseAnonKey = project.findProperty('SUPABASE_ANON_KEY') ?: System.getenv('SUPABASE_ANON_KEY') ?: ""
-        buildConfigField 'String', 'SUPABASE_URL', '"' + supabaseUrl.replace('"', '\"') + '"'
-        buildConfigField 'String', 'SUPABASE_ANON_KEY', '"' + supabaseAnonKey.replace('"', '\"') + '"'
+        versionCode 23
+        versionName '3.9.9'
+        buildConfigField 'String', 'SUPABASE_URL', '""'
+        buildConfigField 'String', 'SUPABASE_ANON_KEY', '""'
     }
 
     buildTypes {
         debug {
-            // Project-local debug key: avoids a concurrently locked Android default debug keystore.
             signingConfig signingConfigs.debug
+            buildConfigField 'String', 'SUPABASE_URL', javaString(testConfig.getProperty('SUPABASE_URL', ''))
+            buildConfigField 'String', 'SUPABASE_ANON_KEY', javaString(testConfig.getProperty('SUPABASE_ANON_KEY', ''))
         }
         release {
             minifyEnabled false
@@ -37,12 +59,14 @@ android {
 
     signingConfigs {
         debug {
-            def localDebugKey = rootProject.file("work/jianbox-debug.keystore")
-            if (localDebugKey.exists()) {
-                storeFile localDebugKey
-                storePassword "android"
-                keyAlias "jianbox-debug"
-                keyPassword "android"
+            def signingPath = testConfig.getProperty('SIGNING_STORE_FILE', '')
+            if (signingPath) {
+                def signingFile = rootProject.file(signingPath).canonicalFile
+                if (!signingFile.isFile()) throw new GradleException('Test signing keystore does not exist.')
+                storeFile signingFile
+                storePassword testConfig.getProperty('SIGNING_STORE_PASSWORD', '')
+                keyAlias testConfig.getProperty('SIGNING_KEY_ALIAS', '')
+                keyPassword testConfig.getProperty('SIGNING_KEY_PASSWORD', '')
             }
         }
     }
@@ -51,4 +75,8 @@ android {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
     }
+}
+
+dependencies {
+    implementation 'androidx.webkit:webkit:1.12.1'
 }

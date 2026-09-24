@@ -2,7 +2,7 @@
 
 简盒是一款以 Android WebView 内置浏览器为核心的悬浮工具箱，集成多标签浏览、悬浮球与侧边栏、网页收藏、下载管理、备忘录、剪贴板、提醒、性能悬浮窗、账号同步、签到和 Supabase 管理后台。
 
-当前版本：`3.9.8`（versionCode 22）。浏览器跳转及媒体嗅探修复说明见 [回归文档](docs/浏览器跳转与媒体嗅探回归.md)。
+当前版本：`3.9.9`（versionCode 23）。修复浏览器跳转、媒体嗅探及网页 Blob 下载，详见 [浏览器回归](docs/浏览器跳转与媒体嗅探回归.md) 和 [Blob 下载与测试构建](docs/Blob下载与本地测试构建.md)。
 
 ## 项目结构
 
@@ -18,20 +18,21 @@
 
 环境要求：JDK 17、Android SDK 36、Android Studio 或 Gradle Wrapper。
 
-Android 客户端只需要 Supabase 项目 URL 和 publishable key。不要把 service-role 或 secret key 放入 Android、网页或 Git 仓库。可在本地 `gradle.properties` 中填写：
-
-```properties
-SUPABASE_URL=https://your-project-ref.supabase.co
-SUPABASE_ANON_KEY=sb_publishable_replace_me
-```
-
-然后构建：
+开源源码不含真实云端配置或签名文件。默认构建可使用本地浏览器功能：
 
 ```powershell
 ./gradlew.bat :app:lintDebug :app:assembleDebug
 ```
 
-也可以在命令行通过 `-PSUPABASE_URL` 和 `-PSUPABASE_ANON_KEY` 传入。未配置时本地浏览器等离线功能仍可编译，云端账号、资料和签到功能会提示尚未配置。
+需要云端功能的测试包，通过 `-PtestBuildConfigFile` 显式指定 **Git 仓库之外** 的本机 properties 文件：
+
+```powershell
+./gradlew.bat -PtestBuildConfigFile=C:/local/jianbox/test-build.properties :app:lintDebug :app:assembleDebug
+```
+
+该文件包含 `SUPABASE_URL` 和 `SUPABASE_ANON_KEY`，只能使用 publishable key 或旧版 anon key；禁止 service-role/secret key。可选的 `SIGNING_STORE_FILE`、`SIGNING_STORE_PASSWORD`、`SIGNING_KEY_ALIAS`、`SIGNING_KEY_PASSWORD` 用于指定测试签名。
+
+配置仅注入 Debug 包。Release 的云端字段保持为空；不再从源码中的 `gradle.properties` 或环境变量自动导入配置。配置文件、签名私钥及 APK 均不得提交到 Git。详见 [测试构建说明](docs/Blob下载与本地测试构建.md)。
 
 ## Supabase 部署
 
